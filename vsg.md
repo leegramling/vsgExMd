@@ -359,17 +359,625 @@ auto scaleMatrix = vsg::scale(factors);
 
 ## Scene Graph
 
-### Node Types
+The VSG scene graph provides a hierarchical structure for organizing 3D content, with efficient node management, state inheritance, and flexible rendering control.
 
-_Content will be added as examples are documented_
+### Node Hierarchy and Types
+
+VSG's scene graph is built on a comprehensive node hierarchy:
+
+```cpp
+vsg::Object                     // Base class for all VSG objects
+├── vsg::Node                   // Base class for scene graph nodes
+│   ├── vsg::Group              // Container for multiple children
+│   │   ├── vsg::QuadGroup      // Spatial organization with quadrants
+│   │   ├── vsg::LOD            // Level-of-detail management
+│   │   └── vsg::Switch         // Conditional rendering control
+│   ├── vsg::Transform          // Apply transformations to children
+│   │   └── vsg::MatrixTransform // Matrix-based transformations
+│   ├── vsg::StateGroup         // Apply state changes to children
+│   └── vsg::Commands           // Renderable leaf nodes
+```
+
+### Node Management Operations
+
+#### Adding and Removing Nodes
+
+```cpp
+// Create root group
+auto root = vsg::Group::create();
+
+// Add children
+root->addChild(childNode);
+root->addChild(transform);
+
+// Remove specific child
+root->removeChild(childNode);
+
+// Clear all children
+root->children.clear();
+
+// Batch operations for performance
+root->children.reserve(expectedSize);
+for (auto& node : nodeList) {
+    root->addChild(node);
+}
+
+// Check if node is a child
+if (std::find(root->children.begin(), root->children.end(), node) != root->children.end()) {
+    // Node is a child
+}
+```
+
+#### Dynamic Scene Modification
+
+```cpp
+// Runtime scene modification
+class SceneManager
+{
+public:
+    void addObject(vsg::ref_ptr<vsg::Node> object, const vsg::dvec3& position)
+    {
+        auto transform = vsg::MatrixTransform::create();
+        transform->matrix = vsg::translate(position);
+        transform->addChild(object);
+        
+        dynamicGroup->addChild(transform);
+    }
+    
+    void removeObject(vsg::ref_ptr<vsg::Node> object)
+    {
+        // Find and remove object from scene
+        auto it = std::find_if(dynamicGroup->children.begin(), dynamicGroup->children.end(),
+            [object](vsg::ref_ptr<vsg::Node> child) {
+                if (auto transform = child.cast<vsg::MatrixTransform>()) {
+                    return !transform->children.empty() && transform->children[0] == object;
+                }
+                return false;
+            });
+            
+        if (it != dynamicGroup->children.end()) {
+            dynamicGroup->removeChild(*it);
+        }
+    }
+    
+private:
+    vsg::ref_ptr<vsg::Group> dynamicGroup = vsg::Group::create();
+};
+```
 
 ### Groups and Transforms
 
-_Content will be added as examples are documented_
+#### Transform Nodes
+
+```cpp
+// Matrix-based transformations
+auto transform = vsg::MatrixTransform::create();
+
+// Static transformation
+transform->matrix = vsg::translate(vsg::vec3(10.0f, 0.0f, 0.0f)) * 
+                   vsg::rotate(vsg::radians(45.0f), vsg::vec3(0.0f, 0.0f, 1.0f)) * 
+                   vsg::scale(vsg::vec3(2.0f, 2.0f, 2.0f));
+
+// Dynamic animation
+while (viewer->advanceToNextFrame()) {
+    float time = std::chrono::duration<float>(viewer->getFrameStamp()->time - viewer->start_point()).count();
+    
+    // Rotation animation
+    transform->matrix = vsg::rotate(time * vsg::radians(90.0f), vsg::vec3(0.0f, 0.0f, 1.0f));
+    
+    // Complex animation combining transformations
+    auto rotation = vsg::rotate(time * vsg::radians(45.0f), vsg::vec3(0.0f, 1.0f, 0.0f));
+    auto translation = vsg::translate(vsg::vec3(sin(time) * 5.0f, 0.0f, 0.0f));
+    transform->matrix = translation * rotation;
+    
+    viewer->update();
+    viewer->recordAndSubmit();
+    viewer->present();
+}
+```
+
+#### Specialized Groups
+
+```cpp
+// QuadGroup for spatial organization
+auto quadGroup = vsg::QuadGroup::create();
+quadGroup->addChild(0, northWestChild);   // NW quadrant
+quadGroup->addChild(1, northEastChild);   // NE quadrant
+quadGroup->addChild(2, southEastChild);   // SE quadrant
+quadGroup->addChild(3, southWestChild);   // SW quadrant
+
+// Switch nodes for conditional rendering
+auto switchNode = vsg::Switch::create();
+switchNode->addChild(false, winterScene);  // Initially disabled
+switchNode->addChild(true, summerScene);   // Initially enabled
+
+// Toggle visibility
+bool showWinter = true;
+switchNode->setChild(0, showWinter, winterScene);
+switchNode->setChild(1, !showWinter, summerScene);
+
+// Enable/disable all children
+switchNode->setAllChildren(false);  // Hide all
+switchNode->setAllChildren(true);   // Show all
+```
 
 ### Level of Detail (LOD)
 
-_Content will be added as examples are documented_
+```cpp
+// LOD for performance optimization
+auto lodNode = vsg::LOD::create();
+
+// Add LOD levels with distance ranges
+lodNode->addChild(vsg::LODRange{0.0, 100.0}, highDetailModel);     // Close range
+lodNode->addChild(vsg::LODRange{100.0, 500.0}, mediumDetailModel); // Medium range
+lodNode->addChild(vsg::LODRange{500.0, DBL_MAX}, lowDetailModel);  // Far range
+
+// Set LOD center point for distance calculations
+lodNode->center = vsg::dvec3(0.0, 0.0, 0.0);
+
+// Example with Builder-generated LOD models
+vsg::Builder builder;
+vsg::GeometryInfo geomInfo;
+vsg::StateInfo stateInfo;
+
+// High detail sphere (many vertices)
+geomInfo.dx = geomInfo.dy = geomInfo.dz = vsg::vec3(2.0f, 2.0f, 2.0f);
+auto highDetailSphere = builder.createSphere(geomInfo, stateInfo);
+
+// Medium detail sphere
+geomInfo.dx = geomInfo.dy = geomInfo.dz = vsg::vec3(1.0f, 1.0f, 1.0f);
+auto mediumDetailSphere = builder.createSphere(geomInfo, stateInfo);
+
+// Low detail sphere (fewer vertices)
+geomInfo.dx = geomInfo.dy = geomInfo.dz = vsg::vec3(0.5f, 0.5f, 0.5f);
+auto lowDetailSphere = builder.createSphere(geomInfo, stateInfo);
+
+lodNode->addChild(vsg::LODRange{0.0, 50.0}, highDetailSphere);
+lodNode->addChild(vsg::LODRange{50.0, 200.0}, mediumDetailSphere);
+lodNode->addChild(vsg::LODRange{200.0, DBL_MAX}, lowDetailSphere);
+```
+
+### Creating New Primitives and Geometry
+
+#### Using VSG Builder for Standard Primitives
+
+```cpp
+// Initialize builder and configuration
+vsg::Builder builder;
+vsg::GeometryInfo geomInfo;
+vsg::StateInfo stateInfo;
+
+// Configure geometry properties
+geomInfo.color = vsg::vec4{1.0f, 0.0f, 0.0f, 1.0f};  // Red color
+geomInfo.position = vsg::vec3{0.0f, 0.0f, 0.0f};     // Origin
+geomInfo.dx = vsg::vec3{2.0f, 0.0f, 0.0f};           // X-axis dimension
+geomInfo.dy = vsg::vec3{0.0f, 2.0f, 0.0f};           // Y-axis dimension
+geomInfo.dz = vsg::vec3{0.0f, 0.0f, 2.0f};           // Z-axis dimension
+
+// Create standard primitives
+auto sphere = builder.createSphere(geomInfo, stateInfo);
+auto cylinder = builder.createCylinder(geomInfo, stateInfo);
+auto cone = builder.createCone(geomInfo, stateInfo);
+auto box = builder.createBox(geomInfo, stateInfo);
+auto capsule = builder.createCapsule(geomInfo, stateInfo);
+
+// Apply transformations during creation
+geomInfo.transform = vsg::translate(vsg::vec3(5.0f, 0.0f, 0.0f)) * vsg::scale(0.5f, 0.5f, 0.5f);
+auto scaledSphere = builder.createSphere(geomInfo, stateInfo);
+```
+
+#### Manual Geometry Creation
+
+```cpp
+// Custom vertex data - separate arrays
+auto vertices = vsg::vec3Array::create({
+    {-1.0f, -1.0f, 0.0f},  // Bottom-left
+    { 1.0f, -1.0f, 0.0f},  // Bottom-right
+    { 1.0f,  1.0f, 0.0f},  // Top-right
+    {-1.0f,  1.0f, 0.0f},  // Top-left
+    { 0.0f,  0.0f, 1.0f}   // Peak (for pyramid)
+});
+
+auto colors = vsg::vec3Array::create({
+    {1.0f, 0.0f, 0.0f},    // Red
+    {0.0f, 1.0f, 0.0f},    // Green
+    {0.0f, 0.0f, 1.0f},    // Blue
+    {1.0f, 1.0f, 0.0f},    // Yellow
+    {1.0f, 0.0f, 1.0f}     // Magenta
+});
+
+auto texCoords = vsg::vec2Array::create({
+    {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}, {0.5f, 0.5f}
+});
+
+// Create indices for different primitive types
+auto quadIndices = vsg::ushortArray::create({
+    0, 1, 2, 2, 3, 0  // Two triangles forming a quad
+});
+
+auto pyramidIndices = vsg::ushortArray::create({
+    0, 1, 4,  // Base triangle 1
+    1, 2, 4,  // Base triangle 2
+    2, 3, 4,  // Base triangle 3
+    3, 0, 4   // Base triangle 4
+});
+```
+
+#### Interleaved Vertex Data (Performance Optimized)
+
+```cpp
+// Interleaved vertex data for better cache locality
+auto attributeArray = vsg::floatArray::create({
+    // x,    y,    z,     r,    g,    b,     s,    t
+    -0.5f, -0.5f, 0.0f,  1.0f, 0.0f, 0.0f,  0.0f, 0.0f,  // Vertex 0
+     0.5f, -0.5f, 0.0f,  0.0f, 1.0f, 0.0f,  1.0f, 0.0f,  // Vertex 1
+     0.5f,  0.5f, 0.0f,  0.0f, 0.0f, 1.0f,  1.0f, 1.0f,  // Vertex 2
+    -0.5f,  0.5f, 0.0f,  1.0f, 1.0f, 1.0f,  0.0f, 1.0f   // Vertex 3
+});
+
+// Vertex input configuration for interleaved data
+vsg::VertexInputState::Bindings vertexBindings{
+    VkVertexInputBindingDescription{0, 32, VK_VERTEX_INPUT_RATE_VERTEX}  // 32 bytes stride
+};
+
+vsg::VertexInputState::Attributes vertexAttributes{
+    VkVertexInputAttributeDescription{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0},   // position: offset 0
+    VkVertexInputAttributeDescription{1, 0, VK_FORMAT_R32G32B32_SFLOAT, 12},  // color: offset 12
+    VkVertexInputAttributeDescription{2, 0, VK_FORMAT_R32G32_SFLOAT, 24}      // texcoord: offset 24
+};
+
+// Create draw commands
+auto drawCommands = vsg::Commands::create();
+drawCommands->addChild(vsg::BindVertexBuffers::create(0, vsg::DataList{attributeArray}));
+drawCommands->addChild(vsg::BindIndexBuffer::create(indices));
+drawCommands->addChild(vsg::DrawIndexed::create(indexCount, 1, 0, 0, 0));
+```
+
+### Creating Custom Shaders for Primitives
+
+#### Basic Shader Creation
+
+```cpp
+// Load shaders from SPIR-V files
+auto vertexShader = vsg::ShaderStage::read(VK_SHADER_STAGE_VERTEX_BIT, "main", 
+    vsg::findFile("shaders/vert_PushConstants.spv", searchPaths));
+auto fragmentShader = vsg::ShaderStage::read(VK_SHADER_STAGE_FRAGMENT_BIT, "main", 
+    vsg::findFile("shaders/frag_PushConstants.spv", searchPaths));
+
+// Create shaders from source code
+auto vertexShader = vsg::ShaderStage::create(VK_SHADER_STAGE_VERTEX_BIT, "main", vertexSource);
+auto fragmentShader = vsg::ShaderStage::create(VK_SHADER_STAGE_FRAGMENT_BIT, "main", fragmentSource);
+```
+
+#### Skybox Shader Example
+
+```cpp
+// Skybox vertex shader - removes translation for infinite distance effect
+const auto skybox_vert = R"(
+#version 450
+
+layout(push_constant) uniform PushConstants {
+    mat4 projection;
+    mat4 modelView;
+} pc;
+
+layout(location = 0) in vec3 vsg_Vertex;
+layout(location = 0) out vec3 UVW;
+
+void main() {
+    UVW = vsg_Vertex;  // Use vertex position as texture coordinate
+    
+    // Remove translation component to keep skybox centered on camera
+    mat4 modelView = pc.modelView;
+    modelView[3] = vec4(0.0, 0.0, 0.0, 1.0);  // Zero out translation
+    
+    vec4 pos = pc.projection * modelView * vec4(vsg_Vertex, 1.0);
+    gl_Position = vec4(pos.xy, 0.0, pos.w);  // Set z to far plane
+}
+)";
+
+// Skybox fragment shader - samples cube map texture
+const auto skybox_frag = R"(
+#version 450
+
+layout(binding = 0) uniform samplerCube envMap;
+
+layout(location = 0) in vec3 UVW;
+layout(location = 0) out vec4 outColor;
+
+void main() {
+    outColor = textureLod(envMap, UVW, 0);  // Sample cube map
+}
+)";
+
+// Create skybox shaders
+auto skyboxVertShader = vsg::ShaderStage::create(VK_SHADER_STAGE_VERTEX_BIT, "main", skybox_vert);
+auto skyboxFragShader = vsg::ShaderStage::create(VK_SHADER_STAGE_FRAGMENT_BIT, "main", skybox_frag);
+```
+
+#### Complete Graphics Pipeline Creation
+
+```cpp
+// Graphics pipeline setup with custom shaders
+vsg::GraphicsPipelineStates pipelineStates{
+    vsg::VertexInputState::create(vertexBindings, vertexAttributes),
+    vsg::InputAssemblyState::create(),        // Primitive assembly
+    vsg::RasterizationState::create(),        // Rasterization settings
+    vsg::MultisampleState::create(),          // MSAA configuration
+    vsg::ColorBlendState::create(),           // Color blending
+    vsg::DepthStencilState::create()          // Depth testing
+};
+
+// Custom rasterization state for skybox
+auto rasterState = vsg::RasterizationState::create();
+rasterState->cullMode = VK_CULL_MODE_FRONT_BIT;  // Cull front faces for skybox
+
+// Custom depth state for skybox
+auto depthState = vsg::DepthStencilState::create();
+depthState->depthTestEnable = VK_TRUE;
+depthState->depthWriteEnable = VK_FALSE;
+depthState->depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;  // Reverse depth
+
+// Push constants for efficient matrix transfer
+vsg::PushConstantRanges pushConstantRanges{
+    {VK_SHADER_STAGE_VERTEX_BIT, 0, 128}  // projection, view, and model matrices
+};
+
+auto pipelineLayout = vsg::PipelineLayout::create(
+    vsg::DescriptorSetLayouts{descriptorSetLayout}, 
+    pushConstantRanges);
+
+auto graphicsPipeline = vsg::GraphicsPipeline::create(pipelineLayout, 
+    vsg::ShaderStages{vertexShader, fragmentShader}, pipelineStates);
+```
+
+### Switching Between 2D Tiled Maps and 3D Tiled Globes
+
+#### Projection Type Management
+
+```cpp
+// Camera setup for different projection modes
+class ProjectionManager
+{
+public:
+    void setupCameras(vsg::ref_ptr<vsg::Node> scene)
+    {
+        // Compute scene bounds for camera positioning
+        vsg::ComputeBounds computeBounds;
+        scene->accept(computeBounds);
+        vsg::dvec3 centre = (computeBounds.bounds.min + computeBounds.bounds.max) * 0.5;
+        double radius = vsg::length(computeBounds.bounds.max - computeBounds.bounds.min) * 0.6;
+        
+        // Create view matrix
+        auto lookAt = vsg::LookAt::create(
+            centre + vsg::dvec3(0.0, -radius * 3.5, 0.0), 
+            centre, 
+            vsg::dvec3(0.0, 0.0, 1.0));
+        
+        // Check for geospatial data (ellipsoid model)
+        auto ellipsoidModel = scene->getRefObject<vsg::EllipsoidModel>("EllipsoidModel");
+        
+        if (ellipsoidModel) {
+            // 3D Globe projection for geospatial data
+            perspective3D = vsg::EllipsoidPerspective::create(
+                lookAt, 
+                ellipsoidModel, 
+                30.0,                    // Field of view
+                aspectRatio, 
+                0.001,                   // Near/far ratio
+                0.0                      // Horizon mountain height
+            );
+            
+            // 2D Map projection (orthographic)
+            perspective2D = vsg::Orthographic::create(
+                -radius, radius,         // Left, right
+                -radius, radius,         // Bottom, top
+                0.001 * radius,          // Near
+                radius * 10.0            // Far
+            );
+        } else {
+            // Standard 3D perspective
+            perspective3D = vsg::Perspective::create(
+                30.0,                    // Field of view
+                aspectRatio, 
+                0.001 * radius,          // Near
+                radius * 4.5             // Far
+            );
+            
+            // 2D orthographic view
+            perspective2D = vsg::Orthographic::create(
+                -radius, radius, -radius, radius, 
+                0.001 * radius, radius * 4.5);
+        }
+        
+        // Create cameras
+        camera3D = vsg::Camera::create(perspective3D, lookAt, viewport);
+        camera2D = vsg::Camera::create(perspective2D, lookAt, viewport);
+    }
+    
+    void switch2D3D(bool use3D)
+    {
+        is3DMode = use3D;
+        activeCamera = use3D ? camera3D : camera2D;
+        
+        // Update render graph with new camera
+        if (renderGraph) {
+            renderGraph->camera = activeCamera;
+        }
+    }
+    
+    bool is3D() const { return is3DMode; }
+    vsg::ref_ptr<vsg::Camera> getActiveCamera() const { return activeCamera; }
+    
+private:
+    vsg::ref_ptr<vsg::ProjectionMatrix> perspective3D;
+    vsg::ref_ptr<vsg::ProjectionMatrix> perspective2D;
+    vsg::ref_ptr<vsg::Camera> camera3D;
+    vsg::ref_ptr<vsg::Camera> camera2D;
+    vsg::ref_ptr<vsg::Camera> activeCamera;
+    vsg::ref_ptr<vsg::RenderGraph> renderGraph;
+    double aspectRatio = 1.0;
+    bool is3DMode = true;
+};
+```
+
+#### Scene Organization for Different Views
+
+```cpp
+// Organize scene for 2D/3D switching
+class TiledSceneManager
+{
+public:
+    void setupScene()
+    {
+        root = vsg::Group::create();
+        
+        // Switch node for different projection modes
+        projectionSwitch = vsg::Switch::create();
+        
+        // 2D tiled map view
+        auto map2DView = vsg::StateGroup::create();
+        map2DView->add(create2DTileShader());
+        map2DView->addChild(tileGeometry2D);
+        projectionSwitch->addChild(false, map2DView);  // Initially disabled
+        
+        // 3D globe view
+        auto globe3DView = vsg::StateGroup::create();
+        globe3DView->add(create3DGlobeShader());
+        globe3DView->addChild(tileGeometry3D);
+        projectionSwitch->addChild(true, globe3DView);   // Initially enabled
+        
+        root->addChild(projectionSwitch);
+        
+        // Common elements (UI, overlays)
+        auto commonElements = vsg::Group::create();
+        commonElements->addChild(createUI());
+        commonElements->addChild(createOverlays());
+        root->addChild(commonElements);
+    }
+    
+    void toggleProjection()
+    {
+        bool current2D = projectionSwitch->children[0].mask != 0;
+        
+        // Toggle visibility
+        projectionSwitch->children[0].mask = current2D ? 0 : ~0;  // 2D view
+        projectionSwitch->children[1].mask = current2D ? ~0 : 0;  // 3D view
+        
+        // Update camera projection
+        projectionManager.switch2D3D(!current2D);
+    }
+    
+    void updateTileLevel(int zoomLevel)
+    {
+        // Update both 2D and 3D tile representations
+        update2DTiles(zoomLevel);
+        update3DTiles(zoomLevel);
+    }
+    
+private:
+    vsg::ref_ptr<vsg::Group> root;
+    vsg::ref_ptr<vsg::Switch> projectionSwitch;
+    vsg::ref_ptr<vsg::Node> tileGeometry2D;
+    vsg::ref_ptr<vsg::Node> tileGeometry3D;
+    ProjectionManager projectionManager;
+    
+    vsg::ref_ptr<vsg::StateGroup> create2DTileShader()
+    {
+        // Shader setup for 2D tile rendering
+        auto stateGroup = vsg::StateGroup::create();
+        // Add 2D-specific shaders and state
+        return stateGroup;
+    }
+    
+    vsg::ref_ptr<vsg::StateGroup> create3DGlobeShader()
+    {
+        // Shader setup for 3D globe rendering
+        auto stateGroup = vsg::StateGroup::create();
+        // Add 3D globe-specific shaders and state
+        return stateGroup;
+    }
+};
+```
+
+### State Management and Inheritance
+
+#### StateGroup Hierarchy
+
+```cpp
+// Hierarchical state management
+auto rootState = vsg::StateGroup::create();
+
+// Material state
+auto materialState = vsg::StateGroup::create();
+materialState->add(vsg::BindGraphicsPipeline::create(materialPipeline));
+
+// Texture state (inherits material)
+auto textureState = vsg::StateGroup::create();
+textureState->add(vsg::BindDescriptorSet::create(
+    VK_PIPELINE_BIND_POINT_GRAPHICS, 
+    pipelineLayout, 
+    0, 
+    textureDescriptorSet));
+
+// Geometry (inherits both material and texture)
+textureState->addChild(geometry);
+materialState->addChild(textureState);
+rootState->addChild(materialState);
+
+// State overrides
+auto highlightState = vsg::StateGroup::create();
+highlightState->add(vsg::BindGraphicsPipeline::create(highlightPipeline));
+highlightState->addChild(selectedGeometry);  // Overrides material pipeline
+rootState->addChild(highlightState);
+```
+
+#### Dynamic State Updates
+
+```cpp
+// Runtime state modification
+class DynamicStateManager
+{
+public:
+    void updateMaterial(vsg::ref_ptr<vsg::StateGroup> stateGroup, const Material& material)
+    {
+        // Update shader uniforms
+        auto uniform = vsg::vec4Value::create(material.diffuseColor);
+        stateGroup->setValue("diffuseColor", uniform);
+        
+        // Update textures
+        if (material.diffuseTexture) {
+            auto texture = vsg::DescriptorImage::create(
+                vsg::ImageInfo::create(sampler, material.diffuseTexture));
+            // Update descriptor set
+        }
+    }
+    
+    void setLighting(bool enabled)
+    {
+        if (enabled) {
+            lightingState->add(vsg::BindGraphicsPipeline::create(litPipeline));
+        } else {
+            lightingState->add(vsg::BindGraphicsPipeline::create(unlitPipeline));
+        }
+    }
+    
+    void setWireframe(bool wireframe)
+    {
+        auto rasterState = vsg::RasterizationState::create();
+        rasterState->polygonMode = wireframe ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
+        
+        wireframeState->stateCommands.clear();
+        wireframeState->add(rasterState);
+    }
+    
+private:
+    vsg::ref_ptr<vsg::StateGroup> lightingState;
+    vsg::ref_ptr<vsg::StateGroup> wireframeState;
+    vsg::ref_ptr<vsg::GraphicsPipeline> litPipeline;
+    vsg::ref_ptr<vsg::GraphicsPipeline> unlitPipeline;
+};
+```
 
 ## Rendering
 
