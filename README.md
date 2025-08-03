@@ -22,4 +22,3 @@ Note: this example focuses on VSG usage, and doesn't use the latest Android API 
        * `find_package( vsg REQUIRED NO_CMAKE_FIND_ROOT_PATH )` and update build.gradle to pass `-Dvsg_DIR=/path/to/vsg/android/installation` 
 
     4. Build the application
-
